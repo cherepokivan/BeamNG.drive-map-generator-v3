@@ -8,37 +8,34 @@
 - экспорт готового мода (`.zip`) в папку `Downloads`.
 
 ## Стек
-- Backend + desktop launcher: Rust (`axum` + `tokio`)
-- Интерфейс: TypeScript + React + Leaflet (Vite)
-- CI: GitHub Actions (автосборка portable `.exe` + UI assets)
+- Backend: Rust (`axum` + `tokio`)
+- Интерфейс: TypeScript + React (Vite)
+- CI: GitHub Actions (автосборка portable `.exe`)
 
-## Как работает portable .exe
-- Запускаете `beamng-map-generator.exe`.
-- Приложение поднимает локальный сервер и **автоматически открывает UI в браузере**.
-- На Windows консольное окно отключено (`windows_subsystem = "windows"`).
+## Запуск backend
+```bash
+cargo run
+```
+API: `POST http://127.0.0.1:8080/api/generate`
 
-## Локальный запуск для разработки
+Пример payload:
+```json
+{
+  "map_name": "moscow_test",
+  "north": 55.76,
+  "south": 55.72,
+  "east": 37.68,
+  "west": 37.55,
+  "texture_resolution": 1024
+}
+```
+
+## Запуск интерфейса
 ```bash
 cd ui
 npm install
-npm run build
-cd ..
-cargo run
+npm run dev
 ```
-
-По умолчанию приложение стартует на `http://127.0.0.1:8080`.
-
-Переменная порта:
-```bash
-BEAMNG_MAP_GENERATOR_PORT=8080 cargo run
-```
-
-Если порт занят, сервер автоматически попробует свободный порт в диапазоне `+1..+20` и откроет корректный URL в браузере.
-
-## Важные изменения UI
-- Выбор области делается через Leaflet-режим выделения: включаете режим и выделяете прямоугольник мышью на карте.
-- Ручного ввода `north/south/east/west` в форме нет.
-- Координаты bbox рассчитываются автоматически по выделенному прямоугольнику.
 
 ## Примечания
 - Heightmap модуль в `src/aws_terrain.rs` сделан как интеграционный слой под AWS Terrain/S3 DEM пайплайн и сейчас содержит детерминированный генератор-заглушку для локальной разработки.

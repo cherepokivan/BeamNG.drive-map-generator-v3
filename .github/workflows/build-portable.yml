@@ -1,0 +1,31 @@
+name: build-portable
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build portable exe
+        run: cargo build --release
+
+      - name: Pack archive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force
+          Copy-Item target/release/beamng-map-generator.exe dist/
+          Compress-Archive -Path dist/* -DestinationPath beamng-map-generator-portable.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: beamng-map-generator-portable
+          path: beamng-map-generator-portable.zip

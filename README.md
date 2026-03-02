@@ -8,34 +8,42 @@
 - экспорт готового мода (`.zip`) в папку `Downloads`.
 
 ## Стек
-- Backend: Rust (`axum` + `tokio`)
-- Интерфейс: TypeScript + React (Vite)
-- CI: GitHub Actions (автосборка portable `.exe`)
+- Backend + desktop launcher: Rust (`axum` + `tokio`)
+- Интерфейс: TypeScript + React + Leaflet (Vite)
+- CI: GitHub Actions (автосборка portable `.exe` + UI assets)
 
-## Запуск backend
-```bash
-cargo run
-```
-API: `POST http://127.0.0.1:8080/api/generate`
+## Как работает portable .exe
+- Запускаете `beamng-map-generator.exe`.
+- Приложение поднимает локальный сервер и **автоматически открывает UI в браузере**.
+- На Windows консольное окно отключено (`windows_subsystem = "windows"`).
 
-Пример payload:
-```json
-{
-  "map_name": "moscow_test",
-  "north": 55.76,
-  "south": 55.72,
-  "east": 37.68,
-  "west": 37.55,
-  "texture_resolution": 1024
-}
-```
-
-## Запуск интерфейса
+## Локальный запуск для разработки
 ```bash
 cd ui
 npm install
-npm run dev
+npm run build
+cd ..
+cargo run
 ```
+
+По умолчанию приложение стартует на `http://127.0.0.1:8080`.
+
+Переменная порта:
+```bash
+BEAMNG_MAP_GENERATOR_PORT=8080 cargo run
+```
+
+Если порт занят, сервер автоматически попробует свободный порт в диапазоне `+1..+20` и откроет корректный URL в браузере.
+
+## Важные изменения UI
+- Выбор области делается через Leaflet-режим выделения: включаете режим и выделяете прямоугольник мышью на карте.
+- Ручного ввода `north/south/east/west` в форме нет.
+- Добавлен второй режим источника данных: **локальный `.osm` файл** (кнопка «Экспорт» на openstreetmap.org).
+
+## OSM и устойчивость загрузки
+- Онлайн-режим использует несколько Overpass endpoint'ов (fallback), а не только один сервер.
+- Если у конкретного пользователя основной Overpass-инстанс недоступен/перегружен, автоматически используются зеркала.
+- Поддержан импорт локального `.osm` файла: API `POST /api/generate-from-osm`.
 
 ## Примечания
 - Heightmap модуль в `src/aws_terrain.rs` сделан как интеграционный слой под AWS Terrain/S3 DEM пайплайн и сейчас содержит детерминированный генератор-заглушку для локальной разработки.

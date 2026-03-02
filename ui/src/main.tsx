@@ -26,6 +26,14 @@ type BBox = {
   west: number;
 };
 
+const TEXTURE_QUALITY_LEVELS = [
+  { value: 512, label: "Очень низко — неиграбельно" },
+  { value: 1024, label: "Низко — на грани играбельности" },
+  { value: 2048, label: "Средне — играбельно" },
+  { value: 4096, label: "Чётко — комфортно играбельно" },
+  { value: 8192, label: "Очень чётко — максимально играбельно" },
+] as const;
+
 function buildBox(aLat: number, aLng: number, bLat: number, bLng: number): BBox {
   return {
     north: Math.max(aLat, bLat),
@@ -163,7 +171,7 @@ function App() {
           <header style={{ padding: "14px 18px", borderBottom: "1px solid #233047" }}>
             <h1 style={{ margin: 0, fontSize: 22 }}>BeamNG Terrain Studio</h1>
             <p style={{ margin: "6px 0 0", color: "#93c5fd", fontSize: 14 }}>
-              Онлайн: выделите область на карте. Локально: загрузите экспортированный .osm файл.
+              Онлайн: выделите область на карте. Локально: загрузите экспортированный .osm файл. Максимум качества текстур: 8192.
             </p>
           </header>
 
@@ -200,7 +208,20 @@ function App() {
 
           <label style={{ display: "block", marginBottom: 12, fontSize: 13, color: "#bfdbfe" }}>
             texture_resolution
-            <input style={inputStyle} type="number" min={256} max={8192} step={256} value={textureResolution} onChange={(event) => setTextureResolution(Number(event.target.value))} />
+            <select
+              style={inputStyle}
+              value={textureResolution}
+              onChange={(event) => setTextureResolution(Number(event.target.value))}
+            >
+              {TEXTURE_QUALITY_LEVELS.map((level) => (
+                <option key={level.value} value={level.value}>
+                  {level.value} — {level.label}
+                </option>
+              ))}
+            </select>
+            <div style={{ marginTop: 6, fontSize: 12, color: "#93c5fd" }}>
+              Текущий уровень: {textureResolution} — {TEXTURE_QUALITY_LEVELS.find((l) => l.value === textureResolution)?.label}
+            </div>
           </label>
 
           <div style={{ marginBottom: 12 }}>

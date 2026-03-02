@@ -4,6 +4,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use geojson::{Feature, GeoJson, Value};
 use quick_xml::{events::Event, Reader};
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 
 use crate::model::{GenerateMapRequest, RoadNode};
@@ -14,6 +15,23 @@ pub struct OsmBounds {
     pub south: f64,
     pub east: f64,
     pub west: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OsmRoad {
+    pub highway_type: String,
+    pub points: Vec<RoadNode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OsmBuilding {
+    pub levels: f32,
+    pub points: Vec<RoadNode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OsmForestArea {
+    pub points: Vec<RoadNode>,
 }
 
 pub async fn download_osm_geojson(request: &GenerateMapRequest) -> Result<GeoJson> {
@@ -292,39 +310,153 @@ pub fn geojson_from_osm_xml(xml_bytes: &[u8]) -> Result<(GeoJson, OsmBounds)> {
     ))
 }
 
-pub fn extract_road_nodes(geojson: &GeoJson) -> Result<Vec<RoadNode>> {
-    let mut nodes = Vec::new();
+pub fn extract_roads(geojson: &GeoJson) -> Vec<OsmRoad> {
+    let mut roads = Vec::new();
     let fc = match geojson {
         GeoJson::FeatureCollection(fc) => fc,
-        _ => return Ok(nodes),
+        _ => return roads,
     };
 
     for feature in &fc.features {
         let props = feature.properties.as_ref();
-        let has_highway = props
+        let highway_type = props
             .and_then(|p| p.get("highway"))
-            .map(|v| !v.is_null())
-            .unwrap_or(false);
-
-        if !has_highway {
+            .and_then(|v| v.as_str())
+            .map(str::to_owned);
+        let Some(highway_type) = highway_type else {
             continue;
-        }
+        };
 
         if let Some(geom) = &feature.geometry {
             if let Value::LineString(points) = &geom.value {
-                for point in points {
-                    if let [lon, lat] = point.as_slice() {
-                        nodes.push(RoadNode {
-                            lat: *lat,
-                            lon: *lon,
-                        });
+                let points: Vec<RoadNode> = points
+                    .iter()
+                    .filter_map(|point| {
+                        if let [lon, lat] = point.as_slice() {
+                            Some(RoadNode {
+                                lat: *lat,
+                                lon: *lon,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                if points.len() >= 2 {
+                    roads.push(OsmRoad {
+                        highway_type,
+                        points,
+                    });
+                }
+            }
+        }
+    }
+
+    roads
+}
+
+pub fn extract_buildings(geojson: &GeoJson) -> Vec<OsmBuilding> {
+    let mut buildings = Vec::new();
+    let fc = match geojson {
+        GeoJson::FeatureCollection(fc) => fc,
+        _ => return buildings,
+    };
+
+    for feature in &fc.features {
+        let props = feature.properties.as_ref();
+        let has_building = props
+            .and_then(|p| p.get("building"))
+            .map(|v| !v.is_null())
+            .unwrap_or(false);
+        if !has_building {
+            continue;
+        }
+
+        let levels = props
+            .and_then(|p| p.get("building:levels"))
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(2.0)
+            .clamp(1.0, 30.0);
+
+        if let Some(geom) = &feature.geometry {
+            if let Value::Polygon(rings) = &geom.value {
+                if let Some(main_ring) = rings.first() {
+                    let points: Vec<RoadNode> = main_ring
+                        .iter()
+                        .filter_map(|point| {
+                            if let [lon, lat] = point.as_slice() {
+                                Some(RoadNode {
+                                    lat: *lat,
+                                    lon: *lon,
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    if points.len() >= 4 {
+                        buildings.push(OsmBuilding { levels, points });
                     }
                 }
             }
         }
     }
 
-    Ok(nodes)
+    buildings
+}
+
+pub fn extract_forest_areas(geojson: &GeoJson) -> Vec<OsmForestArea> {
+    let mut forests = Vec::new();
+    let fc = match geojson {
+        GeoJson::FeatureCollection(fc) => fc,
+        _ => return forests,
+    };
+
+    for feature in &fc.features {
+        let props = feature.properties.as_ref();
+        let is_forest = props
+            .and_then(|p| p.get("landuse"))
+            .and_then(|v| v.as_str())
+            .map(|v| v == "forest")
+            .unwrap_or(false)
+            || props
+                .and_then(|p| p.get("natural"))
+                .and_then(|v| v.as_str())
+                .map(|v| v == "wood")
+                .unwrap_or(false);
+
+        if !is_forest {
+            continue;
+        }
+
+        if let Some(geom) = &feature.geometry {
+            if let Value::Polygon(rings) = &geom.value {
+                if let Some(main_ring) = rings.first() {
+                    let points: Vec<RoadNode> = main_ring
+                        .iter()
+                        .filter_map(|point| {
+                            if let [lon, lat] = point.as_slice() {
+                                Some(RoadNode {
+                                    lat: *lat,
+                                    lon: *lon,
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    if points.len() >= 4 {
+                        forests.push(OsmForestArea { points });
+                    }
+                }
+            }
+        }
+    }
+
+    forests
 }
 
 #[cfg(test)]

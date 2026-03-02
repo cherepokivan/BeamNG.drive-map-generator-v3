@@ -4,18 +4,47 @@ use anyhow::Result;
 use geojson::{GeoJson, Value};
 use image::{ImageBuffer, Rgb};
 
-pub async fn generate_textures(geojson: &GeoJson, out_dir: &Path) -> Result<PathBuf> {
-    let path = out_dir.join("albedo.png");
-    let mut image = ImageBuffer::from_pixel(1024, 1024, Rgb([74, 110, 61]));
+use crate::model::GenerateMapRequest;
+
+pub struct TextureAssets {
+    pub terrain_albedo: PathBuf,
+    pub terrain_normal: PathBuf,
+    pub terrain_roughness: PathBuf,
+    pub building_wall_albedo: PathBuf,
+    pub building_wall_normal: PathBuf,
+    pub building_roof_albedo: PathBuf,
+    pub building_roof_normal: PathBuf,
+}
+
+pub async fn generate_textures(
+    request: &GenerateMapRequest,
+    geojson: &GeoJson,
+    out_dir: &Path,
+) -> Result<TextureAssets> {
+    let size = request.texture_resolution;
+
+    let terrain_albedo = out_dir.join("terrain_albedo.png");
+    let terrain_normal = out_dir.join("terrain_normal.png");
+    let terrain_roughness = out_dir.join("terrain_roughness.png");
+    let building_wall_albedo = out_dir.join("building_wall_albedo.png");
+    let building_wall_normal = out_dir.join("building_wall_normal.png");
+    let building_roof_albedo = out_dir.join("building_roof_albedo.png");
+    let building_roof_normal = out_dir.join("building_roof_normal.png");
+
+    let mut albedo = ImageBuffer::from_pixel(size, size, Rgb([84, 114, 74]));
+    let mut roughness = ImageBuffer::from_pixel(size, size, Rgb([150, 150, 150]));
 
     if let GeoJson::FeatureCollection(fc) = geojson {
         for feature in &fc.features {
             if let Some(geom) = &feature.geometry {
                 match &geom.value {
-                    Value::LineString(line) => paint_line(&mut image, line, [128, 128, 128]),
+                    Value::LineString(line) => {
+                        paint_line(&mut albedo, line, [120, 120, 120]);
+                        paint_line(&mut roughness, line, [200, 200, 200]);
+                    }
                     Value::Polygon(poly) => {
                         if let Some(ring) = poly.first() {
-                            paint_line(&mut image, ring, [98, 142, 84]);
+                            paint_line(&mut albedo, ring, [110, 140, 95]);
                         }
                     }
                     _ => {}
@@ -24,8 +53,58 @@ pub async fn generate_textures(geojson: &GeoJson, out_dir: &Path) -> Result<Path
         }
     }
 
-    image.save(&path)?;
-    Ok(path)
+    let normal_flat = ImageBuffer::from_pixel(size, size, Rgb([128_u8, 128_u8, 255_u8]));
+    let wall_albedo = procedural_wall_texture(512, 512);
+    let wall_normal = procedural_normal_flat(512, 512);
+    let roof_albedo = procedural_roof_texture(512, 512);
+    let roof_normal = procedural_normal_flat(512, 512);
+
+    albedo.save(&terrain_albedo)?;
+    normal_flat.save(&terrain_normal)?;
+    roughness.save(&terrain_roughness)?;
+    wall_albedo.save(&building_wall_albedo)?;
+    wall_normal.save(&building_wall_normal)?;
+    roof_albedo.save(&building_roof_albedo)?;
+    roof_normal.save(&building_roof_normal)?;
+
+    Ok(TextureAssets {
+        terrain_albedo,
+        terrain_normal,
+        terrain_roughness,
+        building_wall_albedo,
+        building_wall_normal,
+        building_roof_albedo,
+        building_roof_normal,
+    })
+}
+
+fn procedural_wall_texture(w: u32, h: u32) -> ImageBuffer<Rgb<u8>, Vec<u8>> {
+    ImageBuffer::from_fn(w, h, |x, y| {
+        let brick_x = (x / 32) % 2;
+        let mortar = x % 32 == 0 || y % 16 == 0 || (y / 16) % 2 == 1 && x % 32 == 16;
+        if mortar {
+            Rgb([120, 120, 120])
+        } else if brick_x == 0 {
+            Rgb([163, 88, 72])
+        } else {
+            Rgb([154, 80, 66])
+        }
+    })
+}
+
+fn procedural_roof_texture(w: u32, h: u32) -> ImageBuffer<Rgb<u8>, Vec<u8>> {
+    ImageBuffer::from_fn(w, h, |x, y| {
+        let checker = ((x / 24) + (y / 24)) % 2 == 0;
+        if checker {
+            Rgb([86, 84, 90])
+        } else {
+            Rgb([72, 70, 76])
+        }
+    })
+}
+
+fn procedural_normal_flat(w: u32, h: u32) -> ImageBuffer<Rgb<u8>, Vec<u8>> {
+    ImageBuffer::from_pixel(w, h, Rgb([128, 128, 255]))
 }
 
 fn paint_line(img: &mut ImageBuffer<Rgb<u8>, Vec<u8>>, coords: &[Vec<f64>], color: [u8; 3]) {

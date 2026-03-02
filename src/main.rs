@@ -21,6 +21,7 @@ use axum::{
     Json, Router,
 };
 use model::{GenerateMapRequest, GenerateMapResponse};
+use osm::{extract_buildings, extract_forest_areas, extract_roads};
 use tokio::{fs, net::TcpListener};
 use tower_http::{
     cors::CorsLayer,
@@ -227,18 +228,23 @@ async fn run_pipeline_with_geojson(
         .await
         .context("AWS terrain download failed")?;
 
-    let texture_path = texture::generate_textures(&osm_data, &build_root)
+    let texture_path = texture::generate_textures(&request, &osm_data, &build_root)
         .await
         .context("texture generation failed")?;
 
-    let road_nodes = osm::extract_road_nodes(&osm_data)?;
+    let roads = extract_roads(&osm_data);
+    let buildings = extract_buildings(&osm_data);
+    let forests = extract_forest_areas(&osm_data);
+    let road_nodes_count: usize = roads.iter().map(|r| r.points.len()).sum();
 
     let mod_path = beamng_export::write_mod_archive(
         &request,
         &build_root,
         &heightmap_path,
         &texture_path,
-        &road_nodes,
+        &roads,
+        &buildings,
+        &forests,
     )
     .await
     .context("BeamNG mod export failed")?;
@@ -246,7 +252,7 @@ async fn run_pipeline_with_geojson(
     Ok(GenerateMapResponse {
         map_name: request.map_name,
         mod_archive: mod_path.to_string_lossy().to_string(),
-        road_nodes_count: road_nodes.len(),
+        road_nodes_count,
     })
 }
 

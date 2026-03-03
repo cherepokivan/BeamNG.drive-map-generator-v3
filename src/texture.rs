@@ -39,12 +39,12 @@ pub async fn generate_textures(
             if let Some(geom) = &feature.geometry {
                 match &geom.value {
                     Value::LineString(line) => {
-                        paint_line(&mut albedo, line, [120, 120, 120]);
-                        paint_line(&mut roughness, line, [200, 200, 200]);
+                        paint_line(&mut albedo, line, [120, 120, 120], request);
+                        paint_line(&mut roughness, line, [200, 200, 200], request);
                     }
                     Value::Polygon(poly) => {
                         if let Some(ring) = poly.first() {
-                            paint_line(&mut albedo, ring, [110, 140, 95]);
+                            paint_line(&mut albedo, ring, [110, 140, 95], request);
                         }
                     }
                     _ => {}
@@ -107,17 +107,28 @@ fn procedural_normal_flat(w: u32, h: u32) -> ImageBuffer<Rgb<u8>, Vec<u8>> {
     ImageBuffer::from_pixel(w, h, Rgb([128, 128, 255]))
 }
 
-fn paint_line(img: &mut ImageBuffer<Rgb<u8>, Vec<u8>>, coords: &[Vec<f64>], color: [u8; 3]) {
+fn paint_line(
+    img: &mut ImageBuffer<Rgb<u8>, Vec<u8>>,
+    coords: &[Vec<f64>],
+    color: [u8; 3],
+    request: &GenerateMapRequest,
+) {
     for pair in coords.windows(2) {
-        let a = geo_to_pixel(pair[0][1], pair[0][0], img.width(), img.height());
-        let b = geo_to_pixel(pair[1][1], pair[1][0], img.width(), img.height());
+        let a = geo_to_pixel(pair[0][1], pair[0][0], img.width(), img.height(), request);
+        let b = geo_to_pixel(pair[1][1], pair[1][0], img.width(), img.height(), request);
         draw_bresenham(img, a, b, color);
     }
 }
 
-fn geo_to_pixel(lat: f64, lon: f64, width: u32, height: u32) -> (i32, i32) {
-    let x = (((lon + 180.0) / 360.0) * width as f64) as i32;
-    let y = (((90.0 - lat) / 180.0) * height as f64) as i32;
+fn geo_to_pixel(
+    lat: f64,
+    lon: f64,
+    width: u32,
+    height: u32,
+    request: &GenerateMapRequest,
+) -> (i32, i32) {
+    let x = ((lon - request.west) / (request.east - request.west) * width as f64) as i32;
+    let y = ((request.north - lat) / (request.north - request.south) * height as f64) as i32;
     (x.clamp(0, width as i32 - 1), y.clamp(0, height as i32 - 1))
 }
 

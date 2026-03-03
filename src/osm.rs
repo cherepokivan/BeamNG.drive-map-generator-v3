@@ -41,7 +41,10 @@ pub async fn download_osm_geojson(request: &GenerateMapRequest) -> Result<GeoJso
           way["highway"]({bbox});
           way["building"]({bbox});
           way["landuse"]({bbox});
+          way["natural"]({bbox});
           relation["building"]({bbox});
+          relation["landuse"]({bbox});
+          relation["natural"]({bbox});
         );
         out geom;"#,
         bbox = request.bbox_str()
@@ -251,7 +254,8 @@ pub fn geojson_from_osm_xml(xml_bytes: &[u8]) -> Result<(GeoJson, OsmBounds)> {
     for (refs, tags) in ways {
         let has_supported_tag = tags.contains_key("highway")
             || tags.contains_key("building")
-            || tags.contains_key("landuse");
+            || tags.contains_key("landuse")
+            || tags.contains_key("natural");
         if !has_supported_tag {
             continue;
         }
@@ -273,7 +277,10 @@ pub fn geojson_from_osm_xml(xml_bytes: &[u8]) -> Result<(GeoJson, OsmBounds)> {
         }
 
         let closed = coords.first() == coords.last();
-        let is_area = closed && (tags.contains_key("building") || tags.contains_key("landuse"));
+        let is_area = closed
+            && (tags.contains_key("building")
+                || tags.contains_key("landuse")
+                || tags.contains_key("natural"));
         let geom = if is_area && coords.len() > 3 {
             geojson::Geometry::new(Value::Polygon(vec![coords]))
         } else {
@@ -290,7 +297,7 @@ pub fn geojson_from_osm_xml(xml_bytes: &[u8]) -> Result<(GeoJson, OsmBounds)> {
     }
 
     if features.is_empty() {
-        bail!("OSM XML parsed, but no supported roads/buildings/landuse found");
+        bail!("OSM XML parsed, but no supported roads/buildings/landuse/natural found");
     }
 
     let bounds = OsmBounds {

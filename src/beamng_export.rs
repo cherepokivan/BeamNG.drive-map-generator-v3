@@ -144,7 +144,11 @@ pub async fn write_mod_archive(
 
     let downloads = dirs::download_dir().unwrap_or_else(|| build_root.to_path_buf());
     fs::create_dir_all(&downloads).await?;
-    let zip_path = downloads.join(format!("{}_beamng_mod.zip", request.map_name));
+    let zip_path = downloads.join(format!(
+        "{}_{}_beamng_mod.zip",
+        request.map_name,
+        chrono::Utc::now().format("%Y%m%d_%H%M%S")
+    ));
 
     let file = std::fs::File::create(&zip_path)?;
     let mut zip = zip::ZipWriter::new(file);

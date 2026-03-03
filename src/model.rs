@@ -22,8 +22,8 @@ impl GenerateMapRequest {
         if self.west >= self.east {
             bail!("west must be lower than east");
         }
-        if !(256..=8192).contains(&self.texture_resolution) {
-            bail!("texture_resolution must be in 256..=8192");
+        if !(512..=8192).contains(&self.texture_resolution) {
+            bail!("texture_resolution must be in 512..=8192");
         }
 
         Ok(())
@@ -31,6 +31,32 @@ impl GenerateMapRequest {
 
     pub fn bbox_str(&self) -> String {
         format!("{},{},{},{}", self.south, self.west, self.north, self.east)
+    }
+}
+
+pub fn sanitize_map_name(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let mapped: String = trimmed
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let collapsed = mapped
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("_");
+    let safe = collapsed.trim_matches('_').trim_matches('-');
+
+    if safe.is_empty() {
+        "generated_map".to_owned()
+    } else {
+        safe.chars().take(48).collect()
     }
 }
 
@@ -62,5 +88,11 @@ mod tests {
             texture_resolution: 1024,
         };
         assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn sanitizes_map_name() {
+        assert_eq!(sanitize_map_name("  my/city..map  "), "my_city_map");
+        assert_eq!(sanitize_map_name("***"), "generated_map");
     }
 }

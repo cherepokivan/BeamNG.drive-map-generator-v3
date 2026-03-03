@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { CircleMarker, MapContainer, Rectangle, TileLayer, useMapEvents } from "react-leaflet";
 import type { LatLngBoundsExpression } from "leaflet";
@@ -26,6 +26,8 @@ type BBox = {
   west: number;
 };
 
+const APP_NAME = "TerraForge";
+
 const TEXTURE_QUALITY_LEVELS = [
   { value: 512, label: "Очень низко — неиграбельно" },
   { value: 1024, label: "Низко — на грани играбельности" },
@@ -45,6 +47,40 @@ function buildBox(aLat: number, aLng: number, bLat: number, bLng: number): BBox 
 
 function isBoxValid(box: BBox): boolean {
   return box.north - box.south > 0.0001 && box.east - box.west > 0.0001;
+}
+
+function formatSeconds(seconds: number): string {
+  if (seconds < 60) return `${seconds} сек`;
+  const minutes = Math.floor(seconds / 60);
+  const restSeconds = seconds % 60;
+  return `${minutes} мин ${restSeconds} сек`;
+}
+
+function estimateGenerationSeconds(textureResolution: number, sourceMode: "online" | "local", bbox: BBox | null): number {
+  const baseByResolution: Record<number, number> = {
+    512: 20,
+    1024: 35,
+    2048: 55,
+    4096: 95,
+    8192: 170,
+  };
+
+  const base = baseByResolution[textureResolution] ?? 45;
+
+  if (sourceMode === "local" || !bbox) {
+    return Math.round(base * 1.2);
+  }
+
+  const midLatRad = ((bbox.north + bbox.south) / 2) * (Math.PI / 180);
+  const kmPerDegLat = 111.32;
+  const kmPerDegLon = 111.32 * Math.cos(midLatRad);
+
+  const widthKm = Math.max(0.1, Math.abs(bbox.east - bbox.west) * kmPerDegLon);
+  const heightKm = Math.max(0.1, Math.abs(bbox.north - bbox.south) * kmPerDegLat);
+  const areaKm2 = widthKm * heightKm;
+
+  const areaFactor = Math.min(2.8, Math.max(0.7, 0.7 + areaKm2 / 120));
+  return Math.round(base * areaFactor);
 }
 
 function AreaSelector({
@@ -100,6 +136,10 @@ function App() {
 
   const [result, setResult] = useState<GenerateResponse | null>(null);
   const [status, setStatus] = useState("Готово");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [progressPercent, setProgressPercent] = useState(0);
+  const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
+  const timerRef = useRef<number | null>(null);
 
   const bounds = useMemo<LatLngBoundsExpression | null>(
     () => (bbox ? [[bbox.south, bbox.west], [bbox.north, bbox.east]] : null),
@@ -110,38 +150,61 @@ function App() {
     [previewBox],
   );
 
+  const stopProgressTimer = () => {
+    if (timerRef.current !== null) {
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
   const submit = async () => {
+    let response: Response;
+
+    if (sourceMode === "local") {
+      if (!osmFile) {
+        setStatus("Выберите локальный .osm файл (Экспорт из OpenStreetMap).");
+        return;
+      }
+    } else if (!bbox) {
+      setStatus("Сначала выделите область на карте (режим Выбор области).");
+      return;
+    }
+
+    const estimateSeconds = estimateGenerationSeconds(textureResolution, sourceMode, bbox);
+    const startedAtMs = Date.now();
+
     setStatus("Генерация...");
     setResult(null);
+    setIsGenerating(true);
+    setEtaSeconds(estimateSeconds);
+    setProgressPercent(2);
+    stopProgressTimer();
+
+    timerRef.current = window.setInterval(() => {
+      const elapsedSec = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+      const nextEta = Math.max(0, estimateSeconds - elapsedSec);
+      const rawProgress = (elapsedSec / Math.max(estimateSeconds, 1)) * 100;
+      const clamped = Math.min(94, Math.max(3, rawProgress));
+      setEtaSeconds(nextEta);
+      setProgressPercent(clamped);
+    }, 500);
 
     try {
-      let response: Response;
-
       if (sourceMode === "local") {
-        if (!osmFile) {
-          setStatus("Выберите локальный .osm файл (Экспорт из OpenStreetMap).");
-          return;
-        }
-
         const form = new FormData();
         form.append("map_name", mapName);
         form.append("texture_resolution", String(textureResolution));
-        form.append("osm_file", osmFile);
+        form.append("osm_file", osmFile as File);
 
         response = await fetch("/api/generate-from-osm", {
           method: "POST",
           body: form,
         });
       } else {
-        if (!bbox) {
-          setStatus("Сначала выделите область на карте (режим Выбор области).");
-          return;
-        }
-
         const payload: GenerateRequest = {
           map_name: mapName,
           texture_resolution: textureResolution,
-          ...bbox,
+          ...(bbox as BBox),
         };
 
         response = await fetch("/api/generate", {
@@ -152,14 +215,29 @@ function App() {
       }
 
       if (!response.ok) {
+        stopProgressTimer();
+        setIsGenerating(false);
+        setProgressPercent(0);
+        setEtaSeconds(null);
         setStatus(`Ошибка: ${await response.text()}`);
         return;
       }
 
       const body = (await response.json()) as GenerateResponse;
+      stopProgressTimer();
       setResult(body);
+      setProgressPercent(100);
+      setEtaSeconds(0);
       setStatus("Готово");
+      window.setTimeout(() => {
+        setIsGenerating(false);
+        setEtaSeconds(null);
+      }, 600);
     } catch (error) {
+      stopProgressTimer();
+      setIsGenerating(false);
+      setProgressPercent(0);
+      setEtaSeconds(null);
       setStatus(`Ошибка сети: ${(error as Error).message}`);
     }
   };
@@ -169,7 +247,7 @@ function App() {
       <section style={{ maxWidth: 1280, margin: "0 auto", display: "grid", gridTemplateColumns: "1fr 380px", gap: 20 }}>
         <article style={{ border: "1px solid #233047", borderRadius: 16, overflow: "hidden", background: "#0b1220", boxShadow: "0 20px 45px rgba(0,0,0,0.35)" }}>
           <header style={{ padding: "14px 18px", borderBottom: "1px solid #233047" }}>
-            <h1 style={{ margin: 0, fontSize: 22 }}>BeamNG Terrain Studio</h1>
+            <h1 style={{ margin: 0, fontSize: 22 }}>{APP_NAME} — BeamNG Terrain Studio</h1>
             <p style={{ margin: "6px 0 0", color: "#93c5fd", fontSize: 14 }}>
               Онлайн: выделите область на карте. Локально: загрузите экспортированный .osm файл. Максимум качества текстур: 8192.
             </p>
@@ -237,9 +315,12 @@ function App() {
           {sourceMode === "online" ? (
             <button
               onClick={() => {
-                setDrawMode((prev) => !prev);
+                setDrawMode((prev) => {
+                  const next = !prev;
+                  setStatus(next ? "Режим выбора включён: выделите область на карте." : "Режим выбора отключён.");
+                  return next;
+                });
                 setPreviewBox(null);
-                setStatus(drawMode ? "Режим выбора отключён." : "Режим выбора включён: выделите область на карте.");
               }}
               style={{ ...buttonStyle, marginBottom: 10, background: drawMode ? "linear-gradient(90deg, #ef4444 0%, #f97316 100%)" : "linear-gradient(90deg, #0891b2 0%, #2563eb 100%)" }}
             >
@@ -265,7 +346,30 @@ function App() {
             Файл: {osmFile ? osmFile.name : "не выбран"}
           </div>
 
-          <button onClick={submit} style={buttonStyle}>Сгенерировать карту</button>
+          <button onClick={submit} style={buttonStyle} disabled={isGenerating}>
+            {isGenerating ? "Генерация…" : "Сгенерировать карту"}
+          </button>
+
+          {isGenerating && (
+            <div style={{ marginTop: 12, border: "1px solid #1e293b", borderRadius: 10, padding: 10, background: "#020617" }}>
+              <div style={{ fontSize: 12, color: "#cbd5e1", marginBottom: 6 }}>
+                Прогресс генерации: {Math.round(progressPercent)}%
+              </div>
+              <div style={{ height: 8, borderRadius: 999, background: "#0f172a", overflow: "hidden" }}>
+                <div
+                  style={{
+                    width: `${progressPercent}%`,
+                    height: "100%",
+                    background: "linear-gradient(90deg, #22d3ee 0%, #3b82f6 100%)",
+                    transition: "width 0.35s ease",
+                  }}
+                />
+              </div>
+              <div style={{ marginTop: 8, fontSize: 12, color: "#93c5fd" }}>
+                Примерное оставшееся время: {etaSeconds === null ? "расчёт..." : formatSeconds(etaSeconds)}
+              </div>
+            </div>
+          )}
 
           <p style={{ marginTop: 12, color: "#93c5fd" }}>{status}</p>
           {result && <pre style={resultStyle}>{JSON.stringify(result, null, 2)}</pre>}

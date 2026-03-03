@@ -20,11 +20,10 @@ use axum::{
     routing::{get_service, post},
     Json, Router,
 };
-use model::{GenerateMapRequest, GenerateMapResponse};
+use model::{sanitize_map_name, GenerateMapRequest, GenerateMapResponse};
 use osm::{extract_buildings, extract_forest_areas, extract_roads};
 use tokio::{fs, net::TcpListener};
 use tower_http::{
-    cors::CorsLayer,
     services::{ServeDir, ServeFile},
     trace::TraceLayer,
 };
@@ -66,7 +65,6 @@ async fn main() -> anyhow::Result<()> {
             ServeDir::new(&static_dir).not_found_service(ServeFile::new(index_path)),
         ))
         .with_state(state)
-        .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
 
     let (listener, addr) = bind_with_fallback(preferred_port).await?;
@@ -147,6 +145,10 @@ async fn generate_map(
     Json(request): Json<GenerateMapRequest>,
 ) -> Result<Json<GenerateMapResponse>, (StatusCode, String)> {
     request.validate().map_err(internal)?;
+    let request = GenerateMapRequest {
+        map_name: sanitize_map_name(&request.map_name),
+        ..request
+    };
 
     let osm_data = osm::download_osm_geojson(&request)
         .await
@@ -196,7 +198,7 @@ async fn generate_map_from_osm_file(
         .map_err(internal)?;
 
     let request = GenerateMapRequest {
-        map_name: map_name.unwrap_or_else(|| "local_osm_map".to_owned()),
+        map_name: sanitize_map_name(&map_name.unwrap_or_else(|| "local_osm_map".to_owned())),
         north: bounds.north,
         south: bounds.south,
         east: bounds.east,
@@ -258,5 +260,8 @@ async fn run_pipeline_with_geojson(
 
 fn internal(err: impl std::fmt::Display) -> (StatusCode, String) {
     error!("map generation error: {err}");
-    (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Внутренняя ошибка генерации. Подробности в логах приложения.".to_owned(),
+    )
 }
